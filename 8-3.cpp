@@ -38,13 +38,17 @@ enum HTTP_CODE
 };
 
 /* 简化设计，仅应答成功或者失败 */
-static const char* szret[] = {"I get a correct result\n", "Hoops,Sometion wrong\n"};
+static const char* szret[] = {
+	"HTTP/1.1 200 OK\rContent-Type: text/html; charset=UTF-8\r\nI get a correct result\n",
+	"HTTP/1.1 200 OK\rContent-Type: text/html; charset=UTF-8\r\nWhoops, Sometion wrong\n"
+};
+// static const char* szret[] = {"I get a correct result\n", "Hoops,Sometion wrong\n"};
 
 LINE_STATUS parse_line(char* buffer, int &checked_index, int &read_index)
 {
 	char temp;
 	/* checked_index指向目前buffer正在分析的字符
-	* read_index指向buffer中客户端数据尾部的下一个字节
+	*  read_index指向buffer中客户端数据尾部的下一个字节
 	*/
 	for (; checked_index < read_index; ++checked_index)
 	{
@@ -71,13 +75,20 @@ LINE_STATUS parse_line(char* buffer, int &checked_index, int &read_index)
 				buffer[checked_index++] = '\0';
 				return LINE_OK;
 			}
+			return LINE_BAD; // \r\n 应该成对出现
 		}
-		return LINE_BAD;
 	}
 	/* 如果内容分析完毕也没有遇到\r字符，表示还需要读取才能进一步分析 */
 	return LINE_OPEN;
 }
 
+
+/**
+ * 解析 GET /search HTTP/1.1 的请求行
+ * @param  temp       请求数据存放缓冲区
+ * @param  checkstats 解析状态
+ * @return            解析结果
+ */
 HTTP_CODE parse_requestline(char* temp, CHECK_STATE &checkstats)
 {
 	/* 找到temp第一个空白符或者\t所在的位置（地址） */
@@ -99,7 +110,7 @@ HTTP_CODE parse_requestline(char* temp, CHECK_STATE &checkstats)
 		return BAD_REQUEST;
 	}
 
-	/* strspn返回str1中第一个不在str2中的字符位置（下标） */
+	/* strspn返回str1中第一个不在str2中的字符位置（偏移） */
 	url += strspn(url, " \t");
 	char* version = strpbrk(url, " \t");
 	if (!version)
@@ -109,7 +120,7 @@ HTTP_CODE parse_requestline(char* temp, CHECK_STATE &checkstats)
 	*version++ = '\0';
 	version += strspn(version, " \t");
 	/* 仅支持HTTP1.1 */
-	if (strcasecmp(version, "HTTP1.1") != 0)
+	if (strcasecmp(version, "HTTP/1.1") != 0)
 	{
 		return BAD_REQUEST;
 	}
@@ -131,22 +142,23 @@ HTTP_CODE parse_requestline(char* temp, CHECK_STATE &checkstats)
 }
 
 /**
- * 分析头部字段
+ * 分析头部字段比如下面之类的
+ * Accept: 、Referer: 、Accept-Language: 、Accept-Encoding: 、User-Agent: 、 Host: 
  */
 HTTP_CODE parse_headers(char* temp)
 {
-	/* 遇到空行，HTTP请求正确 */
+	/* 遇到空行，此处已经被request_line函数将\r\n替换为两个结束符，HTTP请求正确 */
 	if (temp[0] == '\0')
 	{
 		return GET_REQUEST;
 	}
-	else if (strncasecmp(temp, "Host:", 5) == 0)
+	else if (strncasecmp(temp, "Host:", 5) == 0) // 只打印Host参数的值
 	{
 		temp += 5;
 		temp += strspn(temp, " \t");
 		printf("Teh request host is: %s\n", temp);
 	}
-	else
+	else  // 其他参数暂时忽略
 	{
 		printf("I can not handle this header\n");
 	}
@@ -219,6 +231,8 @@ int main(int argc, char const *argv[])
 
 	int listenfd = socket(PF_INET, SOCK_STREAM, 0);
 	assert(listenfd != -1);
+	int reuse = 1;
+	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 	int ret = bind(listenfd, (struct sockaddr*)&address, sizeof(address));
 	assert(ret != -1);
 	ret = listen(listenfd, 5);
@@ -248,7 +262,7 @@ int main(int argc, char const *argv[])
 		}
 		else if (data_read == 0)
 		{
-			printf("remote client has closed teh connection\n");
+			printf("remote client has closed the connection\n");
 			break;
 		}
 		read_index += data_read;
