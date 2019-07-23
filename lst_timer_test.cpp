@@ -64,7 +64,7 @@ void timer_handler()
 }
 
 /* 定时器回调函数 */
-void cd_func(client_data* user_data)
+void cb_func(client_data* user_data)
 {
 	epoll_ctl(epollfd, EPOLL_CTL_DEL, user_data->sockfd, 0);
 	assert(user_data);
@@ -139,10 +139,10 @@ int main(int argc, char const *argv[])
 				users[connfd].address = client_address;
 				users[connfd].sockfd = connfd;
 				util_timer* timer = new util_timer;
-				timer->user_adta = &users[connfd];
+				timer->user_data = &users[connfd];
 				timer->cb_func = cb_func;
 				time_t cur = time(NULL);
-				timer_expire = cur + 3 * TIMESLOT;
+				timer->expire = cur + 3 * TIMESLOT;
 				users[connfd].timer = timer;
 				timer_lst.add_timer(timer);
 			}
@@ -172,7 +172,7 @@ int main(int argc, char const *argv[])
 					}
 				}
 			}
-			else if (events[i].events * EPOLLIN)
+			else if (events[i].events & EPOLLIN)
 			{
 				/* 客户端 */
 				memset(users[sockfd].buf, '\0', BUFFER_SIZE);
@@ -197,7 +197,7 @@ int main(int argc, char const *argv[])
 					if (timer)
 					{
 						time_t cur = time(NULL);
-						timer_expire = cur + 3 * TIMESLOT;
+						timer->expire = cur + 3 * TIMESLOT;
 						printf("adjust timer once\n");
 						timer_lst.adjust_timer(timer);
 					}
